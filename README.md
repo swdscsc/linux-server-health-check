@@ -1,141 +1,192 @@
-# linux-server-health-check · 服务器健康巡检脚本
+# Linux Server Health Check
 
-> 纯 Shell 实现的服务器巡检工具：采集 CPU / 内存 / 磁盘 / inode / 负载 / 关键进程 / TCP 连接，
-> 超阈值告警，输出彩色报告 + JSON 快照 + 按天滚动日志，并以退出码区分是否异常。
+[![Shell checks](https://github.com/swdscsc/linux-server-health-check/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/swdscsc/linux-server-health-check/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## 为什么做这个
+A lightweight Bash-based health check for Linux servers. It reports CPU, memory, disk and inode usage, load average, optional process checks, TCP established connections, and uptime. It supports terminal output, JSON output, daily log files, and exit codes for cron or monitoring integrations.
 
-运维最基础也最容易被忽略的一件事：**在故障发生前发现问题**。
-磁盘满了、进程悄悄退了、内存慢慢涨上去——这些都是可以提前发现的，但没人会每天手动敲一遍 `df -h`。
+[简体中文](#简体中文)
 
-这个脚本的定位是「**最小可用的巡检**」：不装 agent、不依赖任何第三方包，
-一台新机器 `scp` 过去就能跑，配一条 crontab 就实现了每日自动巡检。
+## Features
 
-## 快速开始
+- No Python, Node.js, or third-party package is required at runtime.
+- JSON output for integrations, with escaped string fields.
+- Configurable thresholds for CPU, memory, disk, inode, and load average.
+- Optional process checks: no assumptions about which services are installed.
+- Daily log files and exit codes suitable for scheduled jobs.
+- GitHub Actions checks for Bash syntax, smoke tests, and ShellCheck.
+
+## Requirements
+
+- Linux with `/proc` mounted.
+- Bash, awk, GNU `df`, `pgrep`, and standard command-line utilities.
+- Python 3 is needed only to run the JSON smoke test; ShellCheck is used by CI.
+
+The script is intended for Linux environments. It is not a cross-platform Windows or macOS system monitor.
+
+## Quick start
 
 ```bash
+git clone https://github.com/swdscsc/linux-server-health-check.git
+cd linux-server-health-check
 chmod +x src/health_check.sh
-./src/health_check.sh                  # 巡检并打印彩色报告
-./src/health_check.sh --json           # 只输出 JSON（供监控程序消费）
-./src/health_check.sh --quiet          # 静默模式，只写日志（cron 场景）
+
+# Human-readable report
+./src/health_check.sh
+
+# JSON to stdout
+./src/health_check.sh --json
+
+# Quiet mode for cron (writes logs, no normal terminal report)
+./src/health_check.sh --quiet
 ```
 
-配进 crontab，每天 9 点自动跑：
+The script writes daily logs under `./logs/` by default. Override the location with `LOG_DIR=/path/to/logs`.
 
-```bash
-0 9 * * * /opt/scripts/health_check.sh --quiet
-```
+## Configuration
 
-想让告警自动推送，利用退出码串起来即可：
+All thresholds can be set with environment variables. Percentage thresholds must be integers from 0 to 100. `LOAD_FACTOR` must be greater than 0 and no more than 100.
 
-```bash
-0 9 * * * /opt/scripts/health_check.sh --quiet || /opt/scripts/send_alert.sh
-```
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `CPU_THRESHOLD` | `80` | CPU usage warning percentage |
+| `MEM_THRESHOLD` | `85` | Memory usage warning percentage |
+| `DISK_THRESHOLD` | `85` | Disk usage warning percentage |
+| `INODE_THRESHOLD` | `90` | Inode usage warning percentage |
+| `LOAD_FACTOR` | `2.0` | Load warning threshold = CPU cores × factor |
+| `WATCH_PROCESSES` | empty | Optional, whitespace-separated process names to check |
+| `LOG_DIR` | `./logs` | Directory for daily log files |
+| `JSON_OUT` | empty | Optional path to write the JSON snapshot |
 
-## 实测输出
-
-```
-===== 服务器健康巡检  LAPTOP-IBBOA0BK  2026-10-08 01:01:07 =====
-[OK]   CPU 使用率 9.4%（阈值 80%）
-[WARN] 内存使用率 93.3%（14982MB / 16065MB）超过阈值 85%
-[WARN] 磁盘 /c 已用 98%（阈值 85%）
-[OK]   磁盘 / 已用 57%
-[OK]   磁盘 /e 已用 66%
-[OK]   1 分钟负载 0.92（阈值 16.00，8 核）
-[WARN] 进程 mysqld 未运行或已退出
-[OK]   TCP ESTABLISHED 连接数 0
-[OK]   已运行 3 天 8 小时
-===== 巡检结束：共 6 条告警 =====
-```
-
-## 采集项与阈值
-
-| 项目 | 数据来源 | 默认阈值 | 可覆盖环境变量 |
-| --- | --- | --- | --- |
-| CPU 使用率 | `/proc/stat` 两次采样求差 | 80% | `CPU_THRESHOLD` |
-| 内存使用率 | `/proc/meminfo` | 85% | `MEM_THRESHOLD` |
-| 磁盘空间 | `df -P -B1` | 85% | `DISK_THRESHOLD` |
-| inode 使用率 | `df -Pi` | 90% | `INODE_THRESHOLD` |
-| 系统负载 | `/proc/loadavg` | 核数 × 2.0 | `LOAD_FACTOR` |
-| 关键进程存活 | `pgrep -x` | — | `WATCH_PROCESSES` |
-
-| TCP 连接数 | `/proc/net/tcp` | — | — |
-| 运行时长 | `/proc/uptime` | — | — |
-
-默认不假定服务器一定安装了 `sshd`、`nginx`、`mysqld` 或 `docker`，避免新机器因为不存在的服务而产生误报。需要检查进程时，显式配置要检查的名称，例如：
+Example: check that the SSH daemon and Nginx are running on a host where those services are expected:
 
 ```bash
 WATCH_PROCESSES="sshd nginx" ./src/health_check.sh
 ```
 
-在 cron 中可把变量写进命令前，或放进受控的环境配置文件。请只配置本机确实应该运行的进程。
+The process list is intentionally opt-in to avoid false alarms on hosts that do not run those services.
 
-## 设计取舍（面试能讲的点）
-
-**① CPU 为什么不用 `top -bn1`？**
-`top` 首屏显示的是**开机以来的平均**使用率，不是当前瞬时值，用它做告警会严重滞后。
-本脚本读 `/proc/stat`，间隔 1 秒采样两次求差值：
-
-```
-CPU使用率 = (总时间片增量 - 空闲时间片增量) / 总时间片增量 × 100%
-```
-
-**② 为什么要看 inode？**
-`df -h` 显示磁盘还剩 30%，但写文件报 "No space left on device"——这是经典故障，
-原因是**小文件太多把 inode 耗尽了**。空间够但 inode 不够，一样写不进去。
-只监控磁盘空间会漏掉这类问题。
-
-**③ 为什么关键进程用 `pgrep -x`？**
-`-x` 是精确匹配进程名。不加 `-x` 的话，`pgrep mysql` 会把 `mysqld_safe`、`mysql-backup.sh` 都匹配上，产生误判。
-
-**④ 为什么不依赖 `jq`？**
-JSON 是手写字符串拼的。运维机器上不一定装 `jq`，脚本要能在最小化安装的机器上跑，所以避免一切非必要依赖。
-
-**⑤ 为什么要设退出码？**
-`exit 1` 表示有告警。这样 cron 里可以直接 `||` 接告警动作，也能被监控系统（Zabbix/Prometheus 的 pushgateway）直接采集，脚本因此能融入更大的监控体系而不是孤岛。
-
-## 已知的环境适配
-
-脚本在不同环境实测时修掉过两个真实 bug，代码里都做了防御：
-
-- 某些文件系统（如 Windows 挂载盘、NFS）不提供 inode 信息，`df -Pi` 输出 `-`，
-  直接做数值比较会报 `arithmetic syntax error` → 已加 `[[ "$NUM" =~ ^[0-9]+$ ]] || continue` 跳过。
-- Linux 3.14 之前的内核没有 `MemAvailable` 字段 → 已加回退：`MemFree + Buffers + Cached`。
-
-## 目录结构
-
-```
-linux-server-health-check/
-├── src/health_check.sh     # 主脚本
-├── tests/                  # 冒烟测试
-├── .github/workflows/      # CI 自动检查
-├── docs/讲解文档.md         # 设计思路、代码走读、面试问答
-└── logs/                   # 运行时生成的日志（已加入 .gitignore）
-```
-
-## 后续可做
-
-- [ ] 告警推送：接入企业微信 / 钉钉 webhook
-- [ ] 历史趋势：把每次 JSON 快照落库，画 7 天内存曲线
-- [ ] 进程内存 TOP N：找出具体是哪个进程在吃内存
-
-
-## 最近的可靠性改进
-
-- JSON 输出会转义主机名和时间字段中的引号、反斜杠及控制字符，避免输出无效 JSON。
-- 内存统计会校验总内存和可用内存数据，避免无效值导致除零。
-- inode 告警存在时不再同时输出“inode 最高使用率正常”的总结。
-- TCP ESTABLISHED 连接统计会同时检查 IPv4 与 IPv6。
-- 当 `nproc` 不可用时，尝试从 `/proc/cpuinfo` 获取 CPU 核心数。
-
-## 运行测试
-
-需要 Bash、Python 3（仅测试使用）和 ShellCheck（CI 使用）。
+To write a JSON snapshot to both stdout (with `--json`) and a file:
 
 ```bash
-bash -n src/health_check.sh
+JSON_OUT=/var/tmp/health.json ./src/health_check.sh --json
+```
+
+## Exit codes and automation
+
+- Exit code `0`: no threshold alerts were detected.
+- Exit code `1`: one or more alerts were detected.
+- Exit code `2`: invalid threshold configuration.
+
+Run a daily check at 09:00 and call a notification script when alerts occur:
+
+```cron
+0 9 * * * WATCH_PROCESSES="sshd nginx" /opt/linux-server-health-check/src/health_check.sh --quiet || /opt/scripts/send_alert.sh
+```
+
+Review the configured process list and paths before enabling this example on a real server.
+
+## Example JSON
+
+Illustrative output (values vary by machine):
+
+```json
+{
+  "host": "server-1",
+  "timestamp": "2026-10-28 09:00:00",
+  "cpu_cores": 4,
+  "cpu_usage": 12.1,
+  "mem_usage": 43.4,
+  "mem_used_mb": 2048,
+  "mem_total_mb": 4096,
+  "load1": 0.36,
+  "tcp_established": 12,
+  "alerts": 0
+}
+```
+
+When `--json` is used, the JSON document is printed even when the exit code is `1` because an alert was detected. Automation should check the process exit status as well as parse the output.
+
+## Tests
+
+Run locally:
+
+```bash
+bash -n src/health_check.sh tests/test_health_check.sh
 bash tests/test_health_check.sh
 shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
 ```
 
-GitHub Actions 会在推送和 Pull Request 时执行语法检查、冒烟测试和 ShellCheck。
+## Project files
+
+- `src/health_check.sh`: the health-check script.
+- `tests/test_health_check.sh`: smoke tests including JSON escaping, default process behavior, and invalid configuration.
+- `.github/workflows/ci.yml`: automated checks on pushes and pull requests.
+- `CONTRIBUTING.md`: contribution guidelines.
+- `SECURITY.md`: vulnerability reporting guidance.
+- `CHANGELOG.md`: notable changes.
+
+## Contributing and security
+
+Bug reports and feature requests can be submitted using the GitHub issue templates. Please remove credentials, host-specific sensitive information, and private production logs before posting. For security vulnerabilities, follow `SECURITY.md` rather than posting exploit details in a public issue.
+
+## License
+
+This project is released under the MIT License. See [LICENSE](LICENSE).
+
+---
+
+# 简体中文
+
+一个基于 Bash 的轻量级 Linux 服务器健康巡检脚本，可检查 CPU、内存、磁盘、inode、系统负载、可选进程、TCP 已建立连接数和运行时长，支持终端报告、JSON 输出、每日日志及适合 cron 的退出码。
+
+## 快速开始
+
+```bash
+git clone https://github.com/swdscsc/linux-server-health-check.git
+cd linux-server-health-check
+chmod +x src/health_check.sh
+
+./src/health_check.sh
+./src/health_check.sh --json
+./src/health_check.sh --quiet
+```
+
+运行环境需要 Linux、Bash、awk、GNU `df`、`pgrep` 以及常见命令行工具；运行时不需要 Python、Node.js 或第三方软件包。Python 3 只用于运行 JSON 冒烟测试。
+
+## 配置项
+
+| 变量 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `CPU_THRESHOLD` | `80` | CPU 使用率告警阈值（整数百分比） |
+| `MEM_THRESHOLD` | `85` | 内存使用率告警阈值 |
+| `DISK_THRESHOLD` | `85` | 磁盘使用率告警阈值 |
+| `INODE_THRESHOLD` | `90` | inode 使用率告警阈值 |
+| `LOAD_FACTOR` | `2.0` | 负载阈值 = CPU 核心数 × 系数 |
+| `WATCH_PROCESSES` | 空 | 要检查的进程名列表，默认不检查 |
+| `LOG_DIR` | `./logs` | 每日日志目录 |
+| `JSON_OUT` | 空 | 可选的 JSON 快照输出路径 |
+
+例如，只在明确需要这些服务的服务器上检查 SSH 和 Nginx：
+
+```bash
+WATCH_PROCESSES="sshd nginx" ./src/health_check.sh
+```
+
+百分比阈值必须为 0–100 的整数；`LOAD_FACTOR` 必须大于 0 且不超过 100。错误配置会返回退出码 `2`。
+
+## 退出码
+
+- `0`：没有触发阈值告警。
+- `1`：检测到一个或多个告警。
+- `2`：阈值配置无效。
+
+## 测试
+
+```bash
+bash -n src/health_check.sh tests/test_health_check.sh
+bash tests/test_health_check.sh
+shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
+```
+
+欢迎通过仓库中的 Bug 报告和功能建议模板提交可复现的问题。请勿公开令牌、密码或未经脱敏的生产环境信息。安全漏洞请参照 `SECURITY.md` 报告。

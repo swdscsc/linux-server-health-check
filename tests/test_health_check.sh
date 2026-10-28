@@ -49,14 +49,25 @@ print("health_check.sh smoke tests passed")
 
 # With no explicit process list, the script must not assume common services exist.
 set +e
-default_output=$(CPU_THRESHOLD=101 MEM_THRESHOLD=101 DISK_THRESHOLD=101 \
-  INODE_THRESHOLD=101 LOAD_FACTOR=10000 WATCH_PROCESSES="" \
+default_output=$(CPU_THRESHOLD=100 MEM_THRESHOLD=100 DISK_THRESHOLD=100 \
+  INODE_THRESHOLD=100 LOAD_FACTOR=100 WATCH_PROCESSES="" \
   LOG_DIR="$TMP_DIR/default-process-logs" "$SCRIPT")
 default_status=$?
 set -e
-[[ "$default_status" -eq 0 ]] || {
+[[ "$default_status" -eq 0 || "$default_status" -eq 1 ]] || {
   printf 'Unexpected default run exit code: %s\n' "$default_status" >&2
   exit 1
 }
 grep -q '关键进程检查未启用' <<<"$default_output"
 ! grep -q '未运行或已退出' <<<"$default_output"
+
+# Invalid configuration must fail fast with a clear, non-zero exit.
+set +e
+invalid_output=$(DISK_THRESHOLD=not-a-number LOG_DIR="$TMP_DIR/invalid-config-logs" "$SCRIPT" 2>&1)
+invalid_status=$?
+set -e
+[[ "$invalid_status" -eq 2 ]] || {
+  printf 'Expected invalid threshold exit code 2; got %s\n' "$invalid_status" >&2
+  exit 1
+}
+grep -q 'DISK_THRESHOLD' <<<"$invalid_output"
