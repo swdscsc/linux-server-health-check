@@ -22,7 +22,7 @@ MEM_THRESHOLD=${MEM_THRESHOLD:-85}      # 内存使用率告警阈值(%)
 DISK_THRESHOLD=${DISK_THRESHOLD:-85}    # 磁盘使用率告警阈值(%)
 INODE_THRESHOLD=${INODE_THRESHOLD:-90}  # inode 使用率告警阈值(%)
 LOAD_FACTOR=${LOAD_FACTOR:-2.0}         # 负载告警 = CPU核数 × 该系数
-WATCH_PROCESSES=${WATCH_PROCESSES-}  # Optional whitespace-separated process names; empty disables this check
+WATCH_PROCESSES=${WATCH_PROCESSES-}  # 需要检查的进程名列表；留空时不检查进程
 LOG_DIR=${LOG_DIR:-"./logs"}
 JSON_OUT=${JSON_OUT:-""}
 QUIET=0
