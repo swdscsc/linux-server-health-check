@@ -1,0 +1,48 @@
+name: Bug report
+description: Report a reproducible problem with the health check script.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove secrets, IP addresses, hostnames, and other sensitive production details from logs before posting.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release tag or commit SHA, if known.
+      placeholder: e.g. main / commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Linux distribution/version and Bash version.
+      placeholder: e.g. Ubuntu 24.04, Bash 5.x
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the command and relevant configuration (redact secrets).
+      placeholder: |
+        1. Run ...
+        2. Set ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Paste sanitized output, not private production logs.
+    validations:
+      required: true
