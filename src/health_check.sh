@@ -59,6 +59,17 @@ ok() {
   log "[OK] $1"
   [[ "$QUIET" -eq 0 && "$JSON_ONLY" -eq 0 ]] && printf '\033[32m[OK]\033[0m   %s\n' "$1"
 }
+json_escape() {
+  local value=$1
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  value=${value//$'\b'/\\b}
+  value=${value//$'\f'/\\f}
+  value=${value//$'\n'/\\n}
+  value=${value//$'\r'/\\r}
+  value=${value//$'\t'/\\t}
+  printf '%s' "$value"
+}
 
 # 读 /proc/stat 采样一次 CPU 总时间片
 cpu_snapshot() {
@@ -68,7 +79,8 @@ cpu_snapshot() {
 # ------------------------------- 采集开始 ------------------------------------
 HOSTNAME=$(hostname)
 TIMESTAMP=$(date '+%F %T')
-CPU_CORES=$(nproc)
+CPU_CORES=$(nproc 2>/dev/null || awk '/^processor[[:space:]]*:/ {n++} END {print n+0}' /proc/cpuinfo)
+[[ "$CPU_CORES" =~ ^[0-9]+$ && "$CPU_CORES" -gt 0 ]] || CPU_CORES=1
 
 say "===== 服务器健康巡检  $HOSTNAME  $TIMESTAMP ====="
 
@@ -98,18 +110,23 @@ read -r MEM_TOTAL MEM_AVAIL < <(awk '
   /^Buffers:/       {b=$2}
   /^Cached:/        {c=$2}
   END{if(a=="") a=f+b+c; print t, a}' /proc/meminfo)
-MEM_USE=$(awk -v t="$MEM_TOTAL" -v a="$MEM_AVAIL" 'BEGIN{printf "%.1f", (t-a)/t*100}')
-MEM_USED_MB=$(( (MEM_TOTAL - MEM_AVAIL) / 1024 ))
-MEM_TOTAL_MB=$(( MEM_TOTAL / 1024 ))
-if awk -v m="$MEM_USE" -v th="$MEM_THRESHOLD" 'BEGIN{exit !(m>th)}'; then
-  alert "内存使用率 ${MEM_USE}%（${MEM_USED_MB}MB / ${MEM_TOTAL_MB}MB）超过阈值 ${MEM_THRESHOLD}%"
+if [[ "$MEM_TOTAL" =~ ^[0-9]+$ && "$MEM_TOTAL" -gt 0 && "$MEM_AVAIL" =~ ^[0-9]+$ ]]; then
+  MEM_USE=$(awk -v t="$MEM_TOTAL" -v a="$MEM_AVAIL" 'BEGIN{printf "%.1f", (t-a)/t*100}')
+  MEM_USED_MB=$(( (MEM_TOTAL - MEM_AVAIL) / 1024 ))
+  MEM_TOTAL_MB=$(( MEM_TOTAL / 1024 ))
+  if awk -v m="$MEM_USE" -v th="$MEM_THRESHOLD" 'BEGIN{exit !(m>th)}'; then
+    alert "内存使用率 ${MEM_USE}%（${MEM_USED_MB}MB / ${MEM_TOTAL_MB}MB）超过阈值 ${MEM_THRESHOLD}%"
+  else
+    ok "内存使用率 ${MEM_USE}%（${MEM_USED_MB}MB / ${MEM_TOTAL_MB}MB）"
+  fi
 else
-  ok "内存使用率 ${MEM_USE}%（${MEM_USED_MB}MB / ${MEM_TOTAL_MB}MB）"
+  MEM_USE="0.0"; MEM_USED_MB=0; MEM_TOTAL_MB=0
+  alert "无法读取有效的内存数据"
 fi
 
 # --- 磁盘空间（跳过 tmpfs / devtmpfs 等内存文件系统）---
 DISK_ALERT=0
-while read -r FS SIZE USED PCT MOUNT; do
+while read -r FS SIZE PCT MOUNT; do
   [[ "$FS" == tmpfs* || "$FS" == devtmpfs || "$FS" == overlay ]] && continue
   NUM=${PCT%\%}
   [[ "$NUM" =~ ^[0-9]+$ ]] || continue   # 部分文件系统不报告百分比（显示为 -），跳过
@@ -120,22 +137,26 @@ while read -r FS SIZE USED PCT MOUNT; do
   else
     ok "磁盘 ${MOUNT} 已用 ${PCT}"
   fi
-done < <(df -P -B1 | awk 'NR>1{print $1, $2, $3, $5, $6}')
+done < <(df -P -B1 | awk 'NR>1{print $1, $2, $5, $6}')
 [[ "$DISK_ALERT" -eq 0 ]] || :
 
 # --- inode 使用率（磁盘满了但 df 看不出来，往往是 inode 耗尽）---
 INODE_MAX=0
+INODE_SUPPORTED=0
+INODE_ALERT=0
 while read -r PCT MOUNT; do
   NUM=${PCT%\%}
-  [[ "$NUM" =~ ^[0-9]+$ ]] || continue   # 某些文件系统（如 Windows 挂载盘）不提供 inode 信息，显示为 -
+  [[ "$NUM" =~ ^[0-9]+$ ]] || continue   # 某些文件系统不提供 inode 信息，显示为 -
+  INODE_SUPPORTED=1
   [[ "$NUM" -gt "$INODE_MAX" ]] && INODE_MAX=$NUM
   if [[ "$NUM" -ge "$INODE_THRESHOLD" ]]; then
     alert "inode ${MOUNT} 已用 ${PCT}（阈值 ${INODE_THRESHOLD}%）"
+    INODE_ALERT=1
   fi
 done < <(df -Pi | awk 'NR>1{print $5, $6}')
-if [[ "$INODE_MAX" -eq 0 ]]; then
+if [[ "$INODE_SUPPORTED" -eq 0 ]]; then
   ok "inode 使用率：当前环境不支持统计，已跳过"
-else
+elif [[ "$INODE_ALERT" -eq 0 ]]; then
   ok "inode 最高使用率 ${INODE_MAX}%（阈值 ${INODE_THRESHOLD}%）"
 fi
 
@@ -149,6 +170,7 @@ else
 fi
 
 # --- 关键进程存活 ---
+# shellcheck disable=SC2086 # WATCH_PROCESSES intentionally accepts a whitespace-separated list.
 for proc in $WATCH_PROCESSES; do
   if pgrep -x "$proc" >/dev/null 2>&1; then
     ok "进程 ${proc} 运行正常"
@@ -158,8 +180,13 @@ for proc in $WATCH_PROCESSES; do
 done
 
 # --- TCP 连接数（ESTABLISHED）---
-TCP_EST=$(awk '$4=="01"{n++} END{print n+0}' /proc/net/tcp 2>/dev/null || echo 0)
-ok "TCP ESTABLISHED 连接数 ${TCP_EST}"
+TCP_EST=$(awk '$4=="01"{n++} END{print n+0}' /proc/net/tcp 2>/dev/null)
+TCP_EST=${TCP_EST:-0}
+if [[ -r /proc/net/tcp6 ]]; then
+  TCP_EST6=$(awk '$4=="01"{n++} END{print n+0}' /proc/net/tcp6 2>/dev/null)
+  TCP_EST=$((TCP_EST + ${TCP_EST6:-0}))
+fi
+ok "TCP ESTABLISHED 连接数 ${TCP_EST}（IPv4 + IPv6）"
 
 # --- 运行时长 ---
 UPTIME_INFO=$(awk '{d=int($1/86400); h=int($1%86400/3600); printf "%d 天 %d 小时", d, h}' /proc/uptime)
@@ -169,21 +196,20 @@ say "===== 巡检结束：共 ${ALERT_COUNT} 条告警 ====="
 
 # ------------------------------- JSON 输出 -----------------------------------
 # 手写 JSON（运维机上不一定装 jq，避免依赖）
-json=$(cat <<EOF
-{
-  "host": "$HOSTNAME",
-  "timestamp": "$TIMESTAMP",
-  "cpu_cores": $CPU_CORES,
-  "cpu_usage": $CPU_USE,
-  "mem_usage": $MEM_USE,
-  "mem_used_mb": $MEM_USED_MB,
-  "mem_total_mb": $MEM_TOTAL_MB,
-  "load1": $LOAD1,
-  "tcp_established": $TCP_EST,
-  "alerts": $ALERT_COUNT
-}
-EOF
-)
+HOSTNAME_JSON=$(json_escape "$HOSTNAME")
+TIMESTAMP_JSON=$(json_escape "$TIMESTAMP")
+json=$(printf '{
+  "host": "%s",
+  "timestamp": "%s",
+  "cpu_cores": %s,
+  "cpu_usage": %s,
+  "mem_usage": %s,
+  "mem_used_mb": %s,
+  "mem_total_mb": %s,
+  "load1": %s,
+  "tcp_established": %s,
+  "alerts": %s
+}' "$HOSTNAME_JSON" "$TIMESTAMP_JSON" "$CPU_CORES" "$CPU_USE" "$MEM_USE" "$MEM_USED_MB" "$MEM_TOTAL_MB" "$LOAD1" "$TCP_EST" "$ALERT_COUNT")
 if [[ -n "$JSON_OUT" ]]; then
   printf '%s\n' "$json" >"$JSON_OUT"
 fi
