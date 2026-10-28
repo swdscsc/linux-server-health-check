@@ -125,6 +125,7 @@ shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
 - `CONTRIBUTING.md`: contribution guidelines.
 - `SECURITY.md`: vulnerability reporting guidance.
 - `CHANGELOG.md`: notable changes.
+- `docs/releasing.md`: release checklist and automated release workflow.
 
 ## Contributing and security
 
