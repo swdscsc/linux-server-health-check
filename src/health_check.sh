@@ -126,7 +126,7 @@ fi
 
 # --- 磁盘空间（跳过 tmpfs / devtmpfs 等内存文件系统）---
 DISK_ALERT=0
-while read -r FS SIZE USED PCT MOUNT; do
+while read -r FS SIZE PCT MOUNT; do
   [[ "$FS" == tmpfs* || "$FS" == devtmpfs || "$FS" == overlay ]] && continue
   NUM=${PCT%\%}
   [[ "$NUM" =~ ^[0-9]+$ ]] || continue   # 部分文件系统不报告百分比（显示为 -），跳过
@@ -137,7 +137,7 @@ while read -r FS SIZE USED PCT MOUNT; do
   else
     ok "磁盘 ${MOUNT} 已用 ${PCT}"
   fi
-done < <(df -P -B1 | awk 'NR>1{print $1, $2, $3, $5, $6}')
+done < <(df -P -B1 | awk 'NR>1{print $1, $2, $5, $6}')
 [[ "$DISK_ALERT" -eq 0 ]] || :
 
 # --- inode 使用率（磁盘满了但 df 看不出来，往往是 inode 耗尽）---
