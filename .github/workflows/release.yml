@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semantic version without the v prefix (for example 0.1.0)"
+        required: true
+        type: string
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate version
+        env:
+          VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must look like 0.1.0 or 0.1.0-rc.1." >&2
+            exit 1
+          fi
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A release named $tag already exists." >&2
+            exit 1
+          fi
+          printf 'RELEASE_TAG=%s\n' "$tag" >> "$GITHUB_ENV"
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+
+      - name: Validate scripts
+        run: |
+          bash -n src/health_check.sh tests/test_health_check.sh
+          bash tests/test_health_check.sh
+          shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p dist
+          install -m 0755 src/health_check.sh dist/health_check.sh
+          (cd dist && sha256sum health_check.sh > SHA256SUMS)
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            dist/health_check.sh dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "$RELEASE_TAG" \
+            --generate-notes
