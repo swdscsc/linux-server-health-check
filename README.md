@@ -107,3 +107,24 @@ linux-server-health-check/
 - [ ] 告警推送：接入企业微信 / 钉钉 webhook
 - [ ] 历史趋势：把每次 JSON 快照落库，画 7 天内存曲线
 - [ ] 进程内存 TOP N：找出具体是哪个进程在吃内存
+
+
+## 最近的可靠性改进
+
+- JSON 输出会转义主机名和时间字段中的引号、反斜杠及控制字符，避免输出无效 JSON。
+- 内存统计会校验总内存和可用内存数据，避免无效值导致除零。
+- inode 告警存在时不再同时输出“inode 最高使用率正常”的总结。
+- TCP ESTABLISHED 连接统计会同时检查 IPv4 与 IPv6。
+- 当 \`nproc\` 不可用时，尝试从 \`/proc/cpuinfo\` 获取 CPU 核心数。
+
+## 运行测试
+
+需要 Bash、Python 3（仅测试使用）和 ShellCheck（CI 使用）。
+
+\`\`\`bash
+bash -n src/health_check.sh
+bash tests/test_health_check.sh
+shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
+\`\`\`
+
+GitHub Actions 会在推送和 Pull Request 时执行语法检查、冒烟测试和 ShellCheck。
