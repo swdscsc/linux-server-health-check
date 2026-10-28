@@ -37,6 +37,25 @@ for arg in "$@"; do
   esac
 done
 
+validate_percentage() {
+  local name=$1 value=$2
+  if [[ ! "$value" =~ ^[0-9]+$ ]] || ! awk -v value="$value" 'BEGIN { exit !(value >= 0 && value <= 100) }'; then
+    printf '错误: %s 必须是 0 到 100 之间的整数。\n' "$name" >&2
+    exit 2
+  fi
+}
+
+validate_percentage CPU_THRESHOLD "$CPU_THRESHOLD"
+validate_percentage MEM_THRESHOLD "$MEM_THRESHOLD"
+validate_percentage DISK_THRESHOLD "$DISK_THRESHOLD"
+validate_percentage INODE_THRESHOLD "$INODE_THRESHOLD"
+
+if [[ ! "$LOAD_FACTOR" =~ ^([0-9]+([.][0-9]*)?|[.][0-9]+)$ ]] ||
+   ! awk -v value="$LOAD_FACTOR" 'BEGIN { exit !(value > 0 && value <= 100) }'; then
+  printf '错误: LOAD_FACTOR 必须是大于 0 且不超过 100 的数字。\n' >&2
+  exit 2
+fi
+
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/health_$(date +%F).log"
 
