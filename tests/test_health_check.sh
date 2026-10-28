@@ -60,3 +60,14 @@ set -e
 }
 grep -q '关键进程检查未启用' <<<"$default_output"
 ! grep -q '未运行或已退出' <<<"$default_output"
+
+# Invalid configuration must fail fast with a clear, non-zero exit.
+set +e
+invalid_output=$(DISK_THRESHOLD=not-a-number LOG_DIR="$TMP_DIR/invalid-config-logs" "$SCRIPT" 2>&1)
+invalid_status=$?
+set -e
+[[ "$invalid_status" -eq 2 ]] || {
+  printf 'Expected invalid threshold exit code 2; got %s\n' "$invalid_status" >&2
+  exit 1
+}
+grep -q 'DISK_THRESHOLD' <<<"$invalid_output"
