@@ -58,6 +58,14 @@ chmod +x src/health_check.sh
 | inode 使用率 | `df -Pi` | 90% | `INODE_THRESHOLD` |
 | 系统负载 | `/proc/loadavg` | 核数 × 2.0 | `LOAD_FACTOR` |
 | 关键进程存活 | `pgrep -x` | — | `WATCH_PROCESSES` |
+默认不假定服务器一定安装了 `sshd`、`nginx`、`mysqld` 或 `docker`，避免新机器因为不存在的服务而产生误报。需要检查进程时，显式配置要检查的名称，例如：
+
+```bash
+WATCH_PROCESSES="sshd nginx" ./src/health_check.sh
+```
+
+在 cron 中可把变量写进命令前，或放进受控的环境配置文件。请只配置本机确实应该运行的进程。
+
 | TCP 连接数 | `/proc/net/tcp` | — | — |
 | 运行时长 | `/proc/uptime` | — | — |
 
@@ -98,8 +106,10 @@ JSON 是手写字符串拼的。运维机器上不一定装 `jq`，脚本要能�
 ```
 linux-server-health-check/
 ├── src/health_check.sh     # 主脚本
+├── tests/                  # 冒烟测试
+├── .github/workflows/      # CI 自动检查
 ├── docs/讲解文档.md         # 设计思路、代码走读、面试问答
-└── logs/                   # 按天滚动的巡检日志（health_YYYY-MM-DD.log）
+└── logs/                   # 运行时生成的日志（已加入 .gitignore）
 ```
 
 ## 后续可做
@@ -115,16 +125,16 @@ linux-server-health-check/
 - 内存统计会校验总内存和可用内存数据，避免无效值导致除零。
 - inode 告警存在时不再同时输出“inode 最高使用率正常”的总结。
 - TCP ESTABLISHED 连接统计会同时检查 IPv4 与 IPv6。
-- 当 \`nproc\` 不可用时，尝试从 \`/proc/cpuinfo\` 获取 CPU 核心数。
+- 当 `nproc` 不可用时，尝试从 `/proc/cpuinfo` 获取 CPU 核心数。
 
 ## 运行测试
 
 需要 Bash、Python 3（仅测试使用）和 ShellCheck（CI 使用）。
 
-\`\`\`bash
+```bash
 bash -n src/health_check.sh
 bash tests/test_health_check.sh
 shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
-\`\`\`
+```
 
 GitHub Actions 会在推送和 Pull Request 时执行语法检查、冒烟测试和 ShellCheck。
