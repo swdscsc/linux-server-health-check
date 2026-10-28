@@ -58,6 +58,10 @@ chmod +x src/health_check.sh
 | inode 使用率 | `df -Pi` | 90% | `INODE_THRESHOLD` |
 | 系统负载 | `/proc/loadavg` | 核数 × 2.0 | `LOAD_FACTOR` |
 | 关键进程存活 | `pgrep -x` | — | `WATCH_PROCESSES` |
+
+| TCP 连接数 | `/proc/net/tcp` | — | — |
+| 运行时长 | `/proc/uptime` | — | — |
+
 默认不假定服务器一定安装了 `sshd`、`nginx`、`mysqld` 或 `docker`，避免新机器因为不存在的服务而产生误报。需要检查进程时，显式配置要检查的名称，例如：
 
 ```bash
@@ -65,9 +69,6 @@ WATCH_PROCESSES="sshd nginx" ./src/health_check.sh
 ```
 
 在 cron 中可把变量写进命令前，或放进受控的环境配置文件。请只配置本机确实应该运行的进程。
-
-| TCP 连接数 | `/proc/net/tcp` | — | — |
-| 运行时长 | `/proc/uptime` | — | — |
 
 ## 设计取舍（面试能讲的点）
 
