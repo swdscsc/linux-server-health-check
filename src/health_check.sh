@@ -22,7 +22,7 @@ MEM_THRESHOLD=${MEM_THRESHOLD:-85}      # 内存使用率告警阈值(%)
 DISK_THRESHOLD=${DISK_THRESHOLD:-85}    # 磁盘使用率告警阈值(%)
 INODE_THRESHOLD=${INODE_THRESHOLD:-90}  # inode 使用率告警阈值(%)
 LOAD_FACTOR=${LOAD_FACTOR:-2.0}         # 负载告警 = CPU核数 × 该系数
-WATCH_PROCESSES=${WATCH_PROCESSES:-"sshd nginx mysqld docker"}  # 需存活的关键进程
+WATCH_PROCESSES=${WATCH_PROCESSES-}  # 需要检查的进程名列表；留空时不检查进程
 LOG_DIR=${LOG_DIR:-"./logs"}
 JSON_OUT=${JSON_OUT:-""}
 QUIET=0
@@ -170,14 +170,18 @@ else
 fi
 
 # --- 关键进程存活 ---
-# shellcheck disable=SC2086 # WATCH_PROCESSES intentionally accepts a whitespace-separated list.
-for proc in $WATCH_PROCESSES; do
-  if pgrep -x "$proc" >/dev/null 2>&1; then
-    ok "进程 ${proc} 运行正常"
-  else
-    alert "进程 ${proc} 未运行或已退出"
-  fi
-done
+if [[ -n "$WATCH_PROCESSES" ]]; then
+  # shellcheck disable=SC2086 # WATCH_PROCESSES intentionally accepts a whitespace-separated list.
+  for proc in $WATCH_PROCESSES; do
+    if pgrep -x "$proc" >/dev/null 2>&1; then
+      ok "进程 ${proc} 运行正常"
+    else
+      alert "进程 ${proc} 未运行或已退出"
+    fi
+  done
+else
+  say "关键进程检查未启用（设置 WATCH_PROCESSES 可开启）"
+fi
 
 # --- TCP 连接数（ESTABLISHED）---
 TCP_EST=$(awk '$4=="01"{n++} END{print n+0}' /proc/net/tcp 2>/dev/null)
