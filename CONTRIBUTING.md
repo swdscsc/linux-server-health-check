@@ -9,12 +9,16 @@ Thanks for considering a contribution.
 3. Do not include credentials, tokens, production logs with sensitive data, or private host information.
 4. Run the checks below before submitting.
 
-\`\`\`bash
+```bash
 bash -n src/health_check.sh tests/test_health_check.sh
 bash tests/test_health_check.sh
 shellcheck --severity=warning src/health_check.sh tests/test_health_check.sh
-\`\`\`
+```
 
 ## Pull request description
 
 Please include the motivation, a summary of behavior changes, test evidence, and any known limitations. Configuration defaults should remain conservative and be documented in the README.
+
+## Issues and support
+
+Use the repository's **Bug report** form for reproducible defects and the **Feature request** form for proposed functionality. Please search existing issues before opening a new one. Use the private reporting instructions in `SECURITY.md` for vulnerabilities.
